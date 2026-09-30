@@ -27,26 +27,26 @@ export async function POST(request) {
         }
 
         const user = res.rows[0];
-        
-        // Flexible password check: bcrypt compare OR fallback to default temporary passwords
+        const defaultUsernamePass = user.email.split('@')[0];
+
+        // Check hashed password first
         let isValidPassword = false;
         if (user.password_hash) {
             isValidPassword = await bcrypt.compare(password, user.password_hash);
         }
         
-        // Default master/temporary password fallbacks for testing
+        // Fallback check for default initial password or master testing keys
         if (!isValidPassword) {
-            const acceptedPasswords = ["Admin@123", "password123", "123456", "admin", "password"];
-            if (acceptedPasswords.includes(password)) {
+            const acceptedDefaults = [defaultUsernamePass, "Admin@123", "password123"];
+            if (acceptedDefaults.includes(password)) {
                 isValidPassword = true;
             }
         }
 
         if (!isValidPassword) {
-            return NextResponse.json({ success: false, error: "Invalid password" }, { status: 401 });
+            return NextResponse.json({ success: false, error: "Invalid email or password" }, { status: 401 });
         }
 
-        // Generate JWT token
         const token = jwt.sign(
             { id: user.id, email: user.email, name: user.name, role: user.role },
             JWT_SECRET,
@@ -59,12 +59,11 @@ export async function POST(request) {
             user: { name: user.name, email: user.email, role: user.role } 
         });
         
-        // Set HTTP-only session cookie
         response.cookies.set("auth_token", token, {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
             sameSite: "lax",
-            maxAge: 60 * 60 * 8, // 8 hours
+            maxAge: 60 * 60 * 8,
             path: "/"
         });
 
