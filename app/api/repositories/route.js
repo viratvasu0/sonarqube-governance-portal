@@ -1,11 +1,24 @@
-﻿import { sql } from "@vercel/postgres";
+﻿import { Pool } from "pg";
 import { NextResponse } from "next/server";
+
+const pool = new Pool({
+    connectionString: process.env.POSTGRES_URL || process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false }
+});
 
 export async function GET() {
     try {
-        const { rows } = await sql`SELECT * FROM repositories ORDER BY id DESC;`;
-        const logs = await sql`SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 15;`;
-        return NextResponse.json({ success: true, total: rows.length, repositories: rows, logs: logs.rows });
+        const client = await pool.connect();
+        const reposRes = await client.query("SELECT * FROM repositories ORDER BY id DESC;");
+        const logsRes = await client.query("SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 15;");
+        client.release();
+
+        return NextResponse.json({ 
+            success: true, 
+            total: reposRes.rows.length, 
+            repositories: reposRes.rows, 
+            logs: logsRes.rows 
+        });
     } catch (error) {
         return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }
@@ -21,19 +34,27 @@ export async function POST(request) {
             return NextResponse.json({ success: false, error: "Repository name required" }, { status: 400 });
         }
 
-        await sql`
+        const client = await pool.connect();
+
+        await client.query(`
             INSERT INTO repositories (name, status, properties_main, properties_develop, sonar_project_key, primary_branch, main_scanned, validation_details)
-            VALUES (${repoName}, 'PASSED', true, true, ${projectKey}, ${primaryBranch}, true, 'Onboarded & Saved persistently via DevSecOps Portal')
+            VALUES ($1, 'PASSED', true, true, $2, $3, true, 'Onboarded & Saved persistently via DevSecOps Portal')
             ON CONFLICT (name) DO UPDATE 
-            SET status = 'PASSED', properties_main = true, properties_develop = true, sonar_project_key = ${projectKey}, updated_at = NOW();
-        `;
+            SET status = 'PASSED', properties_main = true, properties_develop = true, sonar_project_key = $2, updated_at = NOW();
+        `, [repoName, projectKey, primaryBranch]);
 
-        await sql`
+        await client.query(`
             INSERT INTO audit_logs (repo_name, action, status, details)
-            VALUES (${repoName}, 'ONBOARD_REPOSITORY', 'SUCCESS', ${`Onboarded project key: ${projectKey}`});
-        `;
+            VALUES ($1, 'ONBOARD_REPOSITORY', 'SUCCESS', $2);
+        `, [repoName, `Onboarded project key: ${projectKey}`]);
 
-        return NextResponse.json({ success: true, message: `Repository '${repoName}' permanently saved to Prisma Postgres!`, projectKey });
+        client.release();
+
+        return NextResponse.json({ 
+            success: true, 
+            message: `Repository '${repoName}' permanently saved to Prisma Postgres!`, 
+            projectKey 
+        });
     } catch (error) {
         return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }
