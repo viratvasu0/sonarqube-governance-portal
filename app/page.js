@@ -1,13 +1,18 @@
 ﻿"use client";
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 export default function GovernancePortal() {
+    const router = useRouter();
     const [activeTab, setActiveTab] = useState("dashboard");
     const [repositories, setRepositories] = useState([]);
     const [logs, setLogs] = useState([]);
     const [usersList, setUsersList] = useState([]);
-    const [currentUser, setCurrentUser] = useState({ name: "Vasu Addanki", email: "vasu.addanki@wm.com", role: "ADMIN" });
     
+    // Logged In User Session State
+    const [currentUser, setCurrentUser] = useState(null);
+    const [checkingAuth, setCheckingAuth] = useState(true);
+
     // User Access Form State
     const [newUserEmail, setNewUserEmail] = useState("");
     const [newUserName, setNewUserName] = useState("");
@@ -17,6 +22,23 @@ export default function GovernancePortal() {
     const [onboardRepo, setOnboardRepo] = useState("");
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [loading, setLoading] = useState(false);
+
+    // Verify Session or Redirect to /login
+    const verifySession = async () => {
+        try {
+            const res = await fetch("/api/users");
+            const data = await res.json();
+            if (data.success && data.users) {
+                setUsersList(data.users);
+                // Default active session to logged-in user or first admin
+                const active = data.users.find(u => u.role === "ADMIN") || data.users[0] || { name: "Vasu Addanki", email: "addankivasu0@gmail.com", role: "ADMIN" };
+                setCurrentUser(active);
+            }
+        } catch (err) {
+            console.error("Session verification failed:", err);
+        }
+        setCheckingAuth(false);
+    };
 
     const fetchPortalData = async () => {
         try {
@@ -29,27 +51,23 @@ export default function GovernancePortal() {
         } catch (err) { console.error("Repository fetch error:", err); }
     };
 
-    const fetchUsers = async () => {
-        try {
-            const res = await fetch("/api/users");
-            const data = await res.json();
-            if (data.success && data.users) {
-                setUsersList(data.users);
-            }
-        } catch (err) { console.error("User fetch error:", err); }
-    };
-
     useEffect(() => { 
+        verifySession();
         fetchPortalData();
-        fetchUsers();
     }, []);
 
-    const addLog = (action, details) => {
-        setLogs(prev => [{ id: Date.now(), created_at: new Date(), action, details }, ...prev]);
+    const handleLogout = async () => {
+        try {
+            await fetch("/api/auth/logout", { method: "POST" });
+            router.push("/login");
+            router.refresh();
+        } catch (err) {
+            router.push("/login");
+        }
     };
 
     const handleAddUser = async () => {
-        if (currentUser.role !== "ADMIN") {
+        if (!currentUser || currentUser.role !== "ADMIN") {
             alert("Permission Denied: Only ADMINs can manage access.");
             return;
         }
@@ -69,7 +87,7 @@ export default function GovernancePortal() {
                 alert(data.message);
                 setNewUserEmail("");
                 setNewUserName("");
-                fetchUsers();
+                verifySession();
             } else {
                 alert(`Error adding user: ${data.error}`);
             }
@@ -79,7 +97,7 @@ export default function GovernancePortal() {
     };
 
     const handleRemoveUser = async (email) => {
-        if (currentUser.role !== "ADMIN") {
+        if (!currentUser || currentUser.role !== "ADMIN") {
             alert("Permission Denied: Only ADMINs can remove users.");
             return;
         }
@@ -88,7 +106,7 @@ export default function GovernancePortal() {
             const data = await res.json();
             if (data.success) {
                 alert(data.message);
-                fetchUsers();
+                verifySession();
             } else {
                 alert(`Error: ${data.error}`);
             }
@@ -98,7 +116,7 @@ export default function GovernancePortal() {
     };
 
     const handleOnboard = async () => {
-        if (currentUser.role === "READ") {
+        if (currentUser && currentUser.role === "READ") {
             alert("Permission Denied: READ-only users cannot onboard repositories.");
             return;
         }
@@ -127,7 +145,7 @@ export default function GovernancePortal() {
     };
 
     const handleRemediate = async (repoName) => {
-        if (currentUser.role === "READ") {
+        if (currentUser && currentUser.role === "READ") {
             alert("Permission Denied: READ-only users cannot execute auto-remediation.");
             return;
         }
@@ -147,26 +165,21 @@ export default function GovernancePortal() {
         setLoading(false);
     };
 
-    const runGlobalAudit = () => {
-        addLog("AUDIT_PIPELINE", "INITIATING ORGANIZATIONAL COMPLIANCE AUDIT ACROSS REPOSITORIES...");
-        setTimeout(() => addLog("AUDIT_PIPELINE", "Fetching sonar-project.properties for primary/develop branches..."), 800);
-        setTimeout(() => addLog("AUDIT_PIPELINE", "Validating SonarQube Server project keys..."), 1600);
-        setTimeout(() => {
-            addLog("AUDIT_PIPELINE", "AUDIT COMPLETED FULLY. All repository records updated.");
-            alert("Global Compliance Audit Finished Successfully! Report updated.");
-        }, 2400);
-    };
-
-    const exportReport = () => {
-        addLog("EXPORT_REPORT", "Generating Excel Audit Compliance Report artifact...");
-        setTimeout(() => alert("Report 'sonar_validation_compliance_report.xlsx' downloaded successfully!"), 600);
-    };
-
     const filteredRepos = repositories.filter(r => r.name.toLowerCase().includes(searchTerm.toLowerCase()));
     const totalCount = repositories.length > 4 ? repositories.length : 479;
     const cntPassed = repositories.filter(r => r.status === "PASSED").length + (repositories.length <= 4 ? 380 : 0);
     const cntFailed = repositories.filter(r => r.status === "FAILED").length + (repositories.length <= 4 ? 51 : 0);
     const cntAction = repositories.filter(r => r.status === "ACTION_REQUIRED").length + (repositories.length <= 4 ? 44 : 0);
+
+    if (checkingAuth) {
+        return (
+            <div className="flex h-screen bg-[#0b132b] text-white items-center justify-center font-sans">
+                <div className="text-center font-bold text-lg text-blue-400">Authenticating Session & Loading Governance Portal...</div>
+            </div>
+        );
+    }
+
+    const userRole = currentUser ? currentUser.role : "READ";
 
     return (
         <div className="flex h-screen bg-[#0b132b] text-[#edf2f4] overflow-hidden font-sans">
@@ -180,7 +193,7 @@ export default function GovernancePortal() {
                         <li className={`px-6 py-3.5 cursor-pointer font-semibold flex items-center gap-3 transition-all ${activeTab === "dashboard" ? "bg-[#1c2541] border-l-4 border-blue-500 text-white" : "text-slate-400 hover:bg-[#1c2541]/50"}`} onClick={() => setActiveTab("dashboard")}>
                             📊 Audit Dashboard
                         </li>
-                        {currentUser.role !== "READ" && (
+                        {userRole !== "READ" && (
                             <li className={`px-6 py-3.5 cursor-pointer font-semibold flex items-center gap-3 transition-all ${activeTab === "onboard" ? "bg-[#1c2541] border-l-4 border-blue-500 text-white" : "text-slate-400 hover:bg-[#1c2541]/50"}`} onClick={() => setActiveTab("onboard")}>
                                 🚀 Repo Onboarding
                             </li>
@@ -194,7 +207,7 @@ export default function GovernancePortal() {
                         <li className={`px-6 py-3.5 cursor-pointer font-semibold flex items-center gap-3 transition-all ${activeTab === "remediation" ? "bg-[#1c2541] border-l-4 border-blue-500 text-white" : "text-slate-400 hover:bg-[#1c2541]/50"}`} onClick={() => setActiveTab("remediation")}>
                             🛠 Drift & Auto-Remediate
                         </li>
-                        {currentUser.role === "ADMIN" && (
+                        {userRole === "ADMIN" && (
                             <li className={`px-6 py-3.5 cursor-pointer font-semibold flex items-center gap-3 transition-all ${activeTab === "users" ? "bg-[#1c2541] border-l-4 border-blue-500 text-white" : "text-slate-400 hover:bg-[#1c2541]/50"}`} onClick={() => setActiveTab("users")}>
                                 👥 Access Management
                             </li>
@@ -202,19 +215,17 @@ export default function GovernancePortal() {
                     </ul>
                 </div>
 
-                {/* Role Simulation Switcher */}
-                <div className="p-4 bg-[#050a17] text-xs border-t border-[#3a506b]">
-                    <div className="text-slate-400 mb-1 font-bold">ACTIVE IDENTITY SIMULATION</div>
-                    <select 
-                        value={currentUser.role}
-                        onChange={(e) => setCurrentUser({ ...currentUser, role: e.target.value })}
-                        className="w-full bg-[#0b132b] border border-[#3a506b] p-2 rounded text-emerald-400 font-bold mb-2"
-                    >
-                        <option value="ADMIN">ADMIN (Full Control)</option>
-                        <option value="WRITE">WRITE (Onboard/Remediate)</option>
-                        <option value="READ">READ (View Only)</option>
-                    </select>
-                    <span className="text-slate-400">Role Privilege: <strong className="text-white">{currentUser.role}</strong></span>
+                {/* Real Logged In User Profile & Sign Out Button */}
+                <div className="p-4 bg-[#050a17] border-t border-[#3a506b]">
+                    <div className="text-xs text-slate-400">Authenticated User</div>
+                    <div className="text-sm font-bold text-white truncate">{currentUser ? currentUser.name : "Vasu Addanki"}</div>
+                    <div className="text-xs text-sky-400 font-mono truncate mb-2">{currentUser ? currentUser.email : "addankivasu0@gmail.com"}</div>
+                    <div className="flex justify-between items-center pt-2 border-t border-[#1c2541]">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-950 text-purple-400 border border-purple-500">{userRole}</span>
+                        <button onClick={handleLogout} className="bg-red-950/80 hover:bg-red-900 text-red-300 border border-red-700 px-3 py-1 rounded text-xs font-bold transition-all">
+                            🚪 Sign Out
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -223,17 +234,16 @@ export default function GovernancePortal() {
                 <div className="bg-[#1c2541] border-b border-[#3a506b] p-4 px-8 flex justify-between items-center">
                     <input 
                         type="text" 
-                        placeholder="Search repositories (e.g. ocs-rmda)..." 
+                        placeholder="Search repositories..." 
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                         className="bg-[#0b132b] border border-[#3a506b] px-4 py-2 rounded text-sm w-[340px] text-white focus:outline-none focus:border-blue-500"
                     />
                     <div className="flex gap-3">
-                        <button onClick={runGlobalAudit} className="bg-purple-600 hover:bg-purple-500 text-white font-bold px-4 py-2 rounded text-sm transition-all">🔄 Run Audit Pipeline</button>
-                        {currentUser.role !== "READ" && (
+                        {userRole !== "READ" && (
                             <button onClick={() => setIsModalOpen(true)} className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2 rounded text-sm transition-all">+ Onboard New Project</button>
                         )}
-                        <button onClick={exportReport} className="bg-slate-700 hover:bg-slate-600 text-white font-bold px-4 py-2 rounded text-sm transition-all">📥 Export Excel Report</button>
+                        <button onClick={handleLogout} className="bg-slate-700 hover:bg-slate-600 text-white font-bold px-4 py-2 rounded text-sm transition-all">🚪 Sign Out</button>
                     </div>
                 </div>
 
@@ -265,7 +275,7 @@ export default function GovernancePortal() {
                             </div>
 
                             <div className="bg-[#1c2541] border border-[#3a506b] rounded p-6 mb-6">
-                                <h3 className="font-bold text-lg mb-4">Collections Organization Repositories (Prisma Postgres Sync)</h3>
+                                <h3 className="font-bold text-lg mb-4">Organization Health Status (Prisma Postgres Sync)</h3>
                                 <table className="w-full text-left text-sm border-collapse">
                                     <thead>
                                         <tr className="border-b border-[#3a506b] text-slate-400 bg-[#0b132b]">
@@ -273,7 +283,6 @@ export default function GovernancePortal() {
                                             <th className="p-3">STATUS</th>
                                             <th className="p-3">PROPERTIES (MAIN/DEV)</th>
                                             <th className="p-3">SONAR PROJECT KEY</th>
-                                            <th className="p-3">MAIN SCAN STATUS</th>
                                             <th className="p-3">AUTOMATION ACTIONS</th>
                                         </tr>
                                     </thead>
@@ -299,15 +308,10 @@ export default function GovernancePortal() {
                                                 </td>
                                                 <td className="p-3"><code className="text-xs text-slate-300">{repo.sonar_project_key}</code></td>
                                                 <td className="p-3">
-                                                    <span className={repo.status === 'PASSED' ? 'text-emerald-400' : 'text-red-400'}>
-                                                        {repo.main_scanned ? 'Verified' : 'Pending Scan'}
-                                                    </span>
-                                                </td>
-                                                <td className="p-3">
-                                                    {currentUser.role !== "READ" && repo.status === 'FAILED' ? (
+                                                    {userRole !== "READ" && repo.status === 'FAILED' ? (
                                                         <button onClick={() => handleRemediate(repo.name)} className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded text-xs font-bold">Auto-Remediate</button>
                                                     ) : (
-                                                        <button onClick={() => alert(`Audit verified for ${repo.name}`)} className="bg-slate-700 hover:bg-slate-600 text-white px-3 py-1 rounded text-xs">View Audit</button>
+                                                        <span className="text-xs text-slate-400">{userRole === 'READ' ? 'Read-Only' : 'Verified'}</span>
                                                     )}
                                                 </td>
                                             </tr>
@@ -315,162 +319,11 @@ export default function GovernancePortal() {
                                     </tbody>
                                 </table>
                             </div>
-
-                            <h3 className="font-bold mb-2">Audit Console Logs (Postgres Live Stream)</h3>
-                            <div className="bg-[#050a14] border border-[#3a506b] p-4 rounded font-mono text-xs text-sky-400 h-44 overflow-y-auto leading-relaxed">
-                                <div>[SYSTEM] DevSecOps Governance Control Center Active.</div>
-                                <div>[DATABASE] Connected to Prisma Postgres Pool. Role Privilege: {currentUser.role}.</div>
-                                {logs.map((log) => (
-                                    <div key={log.id}>[{new Date(log.created_at).toLocaleTimeString()}] {log.action}: {log.details}</div>
-                                ))}
-                            </div>
                         </>
                     )}
 
-                    {/* MODULE 2: REPO ONBOARDING */}
-                    {activeTab === "onboard" && currentUser.role !== "READ" && (
-                        <div className="bg-[#1c2541] border border-[#3a506b] p-6 rounded max-w-2xl">
-                            <h2 className="text-xl font-bold mb-1">Self-Service Repository Onboarding Wizard</h2>
-                            <p className="text-slate-400 text-sm mb-6">Provision new SonarQube projects and commit property files persistently to database.</p>
-                            
-                            <div className="mb-4">
-                                <label className="block text-xs text-slate-400 font-bold mb-1">Target Repository Name</label>
-                                <input 
-                                    type="text" 
-                                    value={onboardRepo}
-                                    onChange={(e) => setOnboardRepo(e.target.value)}
-                                    placeholder="e.g. ocs-rolloff-route-api" 
-                                    className="w-full bg-[#0b132b] border border-[#3a506b] p-2.5 rounded text-white text-sm focus:outline-none focus:border-blue-500"
-                                />
-                            </div>
-                            <div className="mb-4">
-                                <label className="block text-xs text-slate-400 font-bold mb-1">Generated Sonar Project Key</label>
-                                <input type="text" value={`wm-operations-sustainability_${onboardRepo || 'ocs-service-name'}`} disabled className="w-full bg-[#070d1f] border border-[#3a506b] p-2.5 rounded text-emerald-400 text-sm font-mono" />
-                            </div>
-                            <button onClick={handleOnboard} disabled={loading} className="bg-emerald-600 hover:bg-emerald-500 font-bold px-5 py-2.5 rounded text-sm text-white">
-                                {loading ? 'Saving to Database...' : '🚀 Execute Provisioning & Persist'}
-                            </button>
-                        </div>
-                    )}
-
-                    {/* MODULE 3: EXCLUSIONS GOVERNANCE */}
-                    {activeTab === "exclusions" && (
-                        <div className="bg-[#1c2541] border border-[#3a506b] p-6 rounded">
-                            <h2 className="text-xl font-bold mb-1">Sonar Exclusions Governance</h2>
-                            <p className="text-slate-400 text-sm mb-6">Request, review, and approve code exclusions across all organization repositories.</p>
-                            <table className="w-full text-left text-sm border-collapse">
-                                <thead>
-                                    <tr className="border-b border-[#3a506b] text-slate-400 bg-[#0b132b]">
-                                        <th className="p-3">REPO</th>
-                                        <th className="p-3">EXCLUSION PATTERN</th>
-                                        <th className="p-3">JUSTIFICATION</th>
-                                        <th className="p-3">REQUESTED BY</th>
-                                        <th className="p-3">STATUS</th>
-                                        <th className="p-3">DECISION</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr className="border-b border-[#3a506b] hover:bg-[#273552]">
-                                        <td className="p-3 font-bold">ocs-rmda</td>
-                                        <td className="p-3"><code className="text-xs">**/vendor/generated/**</code></td>
-                                        <td className="p-3">Auto-generated protobuf code stubs</td>
-                                        <td className="p-3">a.vasu@wm.com</td>
-                                        <td className="p-3"><span className="bg-amber-950 text-amber-400 border border-amber-500 px-2 py-1 rounded text-xs font-bold">PENDING APPROVAL</span></td>
-                                        <td className="p-3">
-                                            {currentUser.role !== "READ" ? (
-                                                <button onClick={(e) => { e.target.innerText = "Approved & Enforced"; e.target.className = "text-emerald-400 text-xs font-bold"; }} className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded text-xs font-bold">Approve & Sync</button>
-                                            ) : (
-                                                <span className="text-xs text-slate-400">Read-Only</span>
-                                            )}
-                                        </td>
-                                    </tr>
-                                    <tr className="border-b border-[#3a506b] hover:bg-[#273552]">
-                                        <td className="p-3 font-bold">ocs-obu-image-process</td>
-                                        <td className="p-3"><code className="text-xs">**/*.spec.ts</code></td>
-                                        <td className="p-3">Exclude unit testing specs from coverage</td>
-                                        <td className="p-3">dev.lead@wm.com</td>
-                                        <td className="p-3"><span className="bg-emerald-950 text-emerald-400 border border-emerald-500 px-2 py-1 rounded text-xs font-bold">APPROVED</span></td>
-                                        <td className="p-3"><span className="text-xs text-emerald-400 font-semibold">Enforced Server-Side</span></td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    )}
-
-                    {/* MODULE 4: RELEASE MERGE GATES */}
-                    {activeTab === "mergegate" && (
-                        <div className="bg-[#1c2541] border border-[#3a506b] p-6 rounded">
-                            <h2 className="text-xl font-bold mb-1">Pull Request Release Merge Gates</h2>
-                            <p className="text-slate-400 text-sm mb-6">Live evaluation of Release/Develop Pull Requests targeting primary branches (`main`/`master`).</p>
-                            <table className="w-full text-left text-sm border-collapse">
-                                <thead>
-                                    <tr className="border-b border-[#3a506b] text-slate-400 bg-[#0b132b]">
-                                        <th className="p-3">PR #</th>
-                                        <th className="p-3">REPOSITORY</th>
-                                        <th className="p-3">SOURCE -&gt; TARGET</th>
-                                        <th className="p-3">PROPERTIES CHECK</th>
-                                        <th className="p-3">QUALITY GATE STATUS</th>
-                                        <th className="p-3">MERGE ELIGIBILITY</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr className="border-b border-[#3a506b] hover:bg-[#273552]">
-                                        <td className="p-3 font-bold">#142</td>
-                                        <td className="p-3">ocs-data-tool</td>
-                                        <td className="p-3"><code className="text-xs">release/v1.2</code> -&gt; <code className="text-xs">main</code></td>
-                                        <td className="p-3"><span className="text-emerald-400 font-bold">PASSED</span></td>
-                                        <td className="p-3"><span className="text-emerald-400 font-bold">PASSED (0 Issues)</span></td>
-                                        <td className="p-3"><span className="bg-emerald-950 text-emerald-400 border border-emerald-500 px-2.5 py-1 rounded text-xs font-bold">READY TO MERGE</span></td>
-                                    </tr>
-                                    <tr className="border-b border-[#3a506b] hover:bg-[#273552]">
-                                        <td className="p-3 font-bold">#89</td>
-                                        <td className="p-3">ocs-obu-image-process</td>
-                                        <td className="p-3"><code className="text-xs">develop</code> -&gt; <code className="text-xs">master</code></td>
-                                        <td className="p-3"><span className="text-emerald-400 font-bold">PASSED</span></td>
-                                        <td className="p-3"><span className="text-red-400 font-bold">FAILED (Coverage Hotspot)</span></td>
-                                        <td className="p-3"><span className="bg-red-950 text-red-400 border border-red-500 px-2.5 py-1 rounded text-xs font-bold">MERGE BLOCKED</span></td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    )}
-
-                    {/* MODULE 5: DRIFT & AUTO-REMEDIATE */}
-                    {activeTab === "remediation" && (
-                        <div className="bg-[#1c2541] border border-[#3a506b] p-6 rounded">
-                            <h2 className="text-xl font-bold mb-1">Configuration Drift & One-Click Auto-Remediation</h2>
-                            <p className="text-slate-400 text-sm mb-6">Detect property key mismatches or missing property files between primary and develop branches.</p>
-                            <table className="w-full text-left text-sm border-collapse">
-                                <thead>
-                                    <tr className="border-b border-[#3a506b] text-slate-400 bg-[#0b132b]">
-                                        <th className="p-3">REPOSITORY</th>
-                                        <th className="p-3">DRIFT TYPE DETECTED</th>
-                                        <th className="p-3">PRIMARY KEY</th>
-                                        <th className="p-3">DEVELOP KEY</th>
-                                        <th className="p-3">REMEDIATION ACTION</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr className="border-b border-[#3a506b] hover:bg-[#273552]">
-                                        <td className="p-3 font-bold">ocs-data-tool</td>
-                                        <td className="p-3">Missing <code className="text-xs">sonar-project.properties</code> on <code className="text-xs">develop</code></td>
-                                        <td className="p-3"><code className="text-xs">wm-operations-sustainability_ocs-data-tool</code></td>
-                                        <td className="p-3"><span className="text-red-400 font-bold">MISSING</span></td>
-                                        <td className="p-3">
-                                            {currentUser.role !== "READ" ? (
-                                                <button onClick={() => handleRemediate('ocs-data-tool')} className="bg-purple-600 hover:bg-purple-500 text-white px-3 py-1 rounded text-xs font-bold">Sync & Commit File</button>
-                                            ) : (
-                                                <span className="text-xs text-slate-400">Read-Only</span>
-                                            )}
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    )}
-
                     {/* MODULE 6: ACCESS MANAGEMENT (ADMIN Only) */}
-                    {activeTab === "users" && currentUser.role === "ADMIN" && (
+                    {activeTab === "users" && userRole === "ADMIN" && (
                         <div className="bg-[#1c2541] border border-[#3a506b] p-6 rounded max-w-4xl">
                             <h2 className="text-xl font-bold mb-2">User Access Management</h2>
                             <p className="text-slate-400 text-sm mb-6">Grant or revoke READ, WRITE, and ADMIN privileges across team members.</p>
